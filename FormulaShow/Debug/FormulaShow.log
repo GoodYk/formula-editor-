@@ -1,0 +1,41 @@
+﻿生成启动时间为 2016/8/30 11:44:17。
+     1>项目“C:\Users\Musk\Desktop\FormulaShow\FormulaShow\FormulaShow\FormulaShow.vcxproj”在节点 2 上(Build 个目标)。
+     1>CustomBuild:
+         Moc'ing formulashow.h...
+         Uic'ing formulashow.ui...
+         Moc'ing formulaview.h...
+         Rcc'ing formulashow.qrc...
+     1>RCC : warning : No resources in 'C:\Users\Musk\Desktop\FormulaShow\FormulaShow\FormulaShow\formulashow.qrc'.
+         
+       ClCompile:
+         C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\bin\CL.exe /c /I.\GeneratedFiles /I. /IC:\Qt\Qt5.5.1\5.5\msvc2013\include /I.\GeneratedFiles\Debug /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtCore /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtGui /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtWidgets /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QWT /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtXml /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtXmlPatterns /Zi /nologo /W1 /WX- /Od /Oy- /D UNICODE /D WIN32 /D WIN64 /D QT_DLL /D QT_CORE_LIB /D QT_GUI_LIB /D QT_WIDGETS_LIB /D QT_XML_LIB /D QT_XMLPATTERNS_LIB /Gm- /EHsc /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Fo"Debug\\" /Fd"Debug\vc120.pdb" /Gd /TP /analyze- /errorReport:prompt formulashow.cpp formulaview.cpp GeneratedFiles\Debug\moc_formulashow.cpp GeneratedFiles\Debug\moc_formulaview.cpp main.cpp qwt_mml_document.cpp qwt_mml_entity_table.cpp
+         formulashow.cpp
+         formulaview.cpp
+         moc_formulashow.cpp
+         moc_formulaview.cpp
+         main.cpp
+         qwt_mml_document.cpp
+     1>qwt_mml_document.cpp(2578): warning C4566: 由通用字符名称“\u2212”表示的字符不能在当前代码页(936)中表示出来
+     1>qwt_mml_document.cpp(2606): warning C4566: 由通用字符名称“\u2212”表示的字符不能在当前代码页(936)中表示出来
+     1>qwt_mml_document.cpp(2612): warning C4566: 由通用字符名称“\u230A”表示的字符不能在当前代码页(936)中表示出来
+     1>qwt_mml_document.cpp(2613): warning C4566: 由通用字符名称“\u2308”表示的字符不能在当前代码页(936)中表示出来
+     1>qwt_mml_document.cpp(2690): warning C4566: 由通用字符名称“\u2212”表示的字符不能在当前代码页(936)中表示出来
+         qwt_mml_entity_table.cpp
+         正在生成代码...
+         C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\bin\CL.exe /c /I.\GeneratedFiles /I. /IC:\Qt\Qt5.5.1\5.5\msvc2013\include /I.\GeneratedFiles\Debug /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtCore /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtGui /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtWidgets /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QWT /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtXml /IC:\Qt\Qt5.5.1\5.5\msvc2013\include\QtXmlPatterns /Zi /nologo /W1 /WX- /Od /Oy- /D UNICODE /D WIN32 /D WIN64 /D QT_DLL /D QT_CORE_LIB /D QT_GUI_LIB /D QT_WIDGETS_LIB /D QT_XML_LIB /D QT_XMLPATTERNS_LIB /Gm- /EHsc /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Fo"Debug\\" /Fd"Debug\vc120.pdb" /Gd /TP /analyze- /errorReport:prompt GeneratedFiles\qrc_formulashow.cpp
+         qrc_formulashow.cpp
+       Link:
+         C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\bin\link.exe /ERRORREPORT:PROMPT /OUT:"C:\Users\Musk\Desktop\FormulaShow\FormulaShow\Win32\Debug\\FormulaShow.exe" /NOLOGO /LIBPATH:C:\Qt\Qt5.5.1\5.5\msvc2013\lib qtmaind.lib Qt5Cored.lib Qt5Guid.lib Qt5Widgetsd.lib Qt5Xmld.lib Qt5XmlPatternsd.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:\Users\Musk\Desktop\FormulaShow\FormulaShow\Win32\Debug\FormulaShow.pdb" /SUBSYSTEM:WINDOWS /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:\Users\Musk\Desktop\FormulaShow\FormulaShow\Win32\Debug\FormulaShow.lib" /MACHINE:X86 /SAFESEH Debug\formulashow.obj
+         Debug\formulaview.obj
+         Debug\moc_formulashow.obj
+         Debug\moc_formulaview.obj
+         Debug\qrc_formulashow.obj
+         Debug\main.obj
+         Debug\qwt_mml_document.obj
+         Debug\qwt_mml_entity_table.obj
+         FormulaShow.vcxproj -> C:\Users\Musk\Desktop\FormulaShow\FormulaShow\Win32\Debug\FormulaShow.exe
+     1>已完成生成项目“C:\Users\Musk\Desktop\FormulaShow\FormulaShow\FormulaShow\FormulaShow.vcxproj”(Build 个目标)的操作。
+
+生成成功。
+
+已用时间 00:00:22.48

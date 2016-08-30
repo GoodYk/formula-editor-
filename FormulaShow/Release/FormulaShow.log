@@ -1,0 +1,4 @@
+﻿  formulashow.cpp
+c:\python27\include\pymath.h(22): warning C4273: 'round' : inconsistent dll linkage
+          C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\include\math.h(516) : see previous definition of 'round'
+  FormulaShow.vcxproj -> C:\Users\Yk\Desktop\formulaShow\FormulaShow\Win32\Release\FormulaShow.exe

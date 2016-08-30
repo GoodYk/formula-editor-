@@ -1,0 +1,660 @@
+# Copyright (c) 2010-2011, Gabriele Favalessa
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import re
+
+from xml.etree.ElementTree import Element, tostring
+
+__all__ = ['parse']
+
+Element_ = Element
+AtomicString_ = lambda s: s
+
+def El(tag, text=None, *children, **attrib):
+    element = Element_(tag, **attrib)
+
+    if not text is None:
+        if isinstance(text, basestring):
+            element.text = AtomicString_(text)
+        else:
+            children = (text, ) + children
+
+    for child in children:
+        element.append(child)
+
+    return element
+
+number_re = re.compile('-?(\d+\.(\d+)?|\.?\d+)')
+
+def strip_parens(n):
+    if n.tag == 'mrow':
+        if n[0].get('_opening', False):
+           del n[0]
+
+        if n[-1].get('_closing', False):
+            del n[-1]
+
+    return n
+
+def is_enclosed_in_parens(n):
+    return n.tag == 'mrow' and n[0].get('_opening', False) and n[-1].get('_closing', False)
+
+def binary(operator, operand_1, operand_2, swap=False):
+    operand_1 = strip_parens(operand_1)
+    operand_2 = strip_parens(operand_2)
+    if not swap:
+        operator.append(operand_1)
+        operator.append(operand_2)
+    else:
+        operator.append(operand_2)
+        operator.append(operand_1)
+
+    return operator
+
+def unary(operator, operand, swap=False):
+    operand = strip_parens(operand)
+    if swap:
+        operator.insert(0, operand)
+    else:
+        operator.append(operand)
+
+    return operator
+
+def frac(num, den):
+    return El('mfrac', strip_parens(num), strip_parens(den))
+
+def sub(base, subscript):
+    subscript = strip_parens(subscript)
+
+    if base.tag in ('msup', 'mover'):
+        children = base.getchildren()
+        n = El('msubsup' if base.tag == 'msup' else 'munderover', children[0], subscript, children[1])
+    else:
+        n = El('munder' if base.get('_underover', False) else 'msub', base, subscript)
+
+    return n
+
+def sup(base, superscript):
+    superscript = strip_parens(superscript)
+
+    if base.tag in ('msub', 'munder'):
+        children = base.getchildren()
+        n = El('msubsup' if base.tag == 'msub' else 'munderover', children[0], children[1], superscript)
+    else:
+        n = El('mover' if base.get('_underover', False) else 'msup', base, superscript)
+
+    return n
+
+def parse(s, element=Element, atomicstring=lambda s: s):
+    """
+Translates from ASCIIMathML (an easy to type and highly readable way to
+represent math formulas) into MathML (a w3c standard directly displayable by
+some web browsers).
+
+The function `parse()` generates a tree of elements:
+
+    >>> import asciimathml
+    >>> asciimathml.parse('sqrt 2')
+    <Element math at b76fb28c>
+
+The tree can then be manipulated using the standard python library.  For
+example we can generate its string representation:
+    El('mtr', El('mtd', *nodes))
+	El('mtr', El('mtd', El('msup', *nodes)))
+    >>> from xml.etree.ElementTree import tostring
+    >>> tostring(asciimathml.parse('sqrt 2'))
+    '<math><mstyle><msqrt><mn>2</mn></msqrt></mstyle></math>'
+    """
+
+    global Element_, AtomicString_
+
+    Element_ = element
+    AtomicString_ = atomicstring
+
+    s, nodes = parse_exprs(s)
+    remove_invisible(nodes)
+    nodes = map(remove_private, nodes)
+
+    return tostring(El('mtr', El('mtd', *nodes)))
+
+delimiters = {'{': '}', '(': ')', '[': ']'}
+
+def parse_string(s):
+    opening = s[0]
+
+    if opening in delimiters:
+        closing = delimiters[opening]
+        end = s.find(closing)
+
+        text = s[1:end]
+        s = s[end+1:]
+    else:
+        s, text = parse_m(s)
+
+    return s, El('mrow', El('mtext', text))
+
+tracing_level = 0
+def trace_parser(p):
+    """
+    Decorator for tracing the parser.
+
+    Use it to decorate functions with signature:
+
+      string -> (string, nodes)
+
+    and a trace of the progress made by the parser will be printed to stderr.
+
+    Currently parse_exprs(), parse_expr() and parse_m() have the right signature.
+    """
+
+    def nodes_to_string(n):
+        if isinstance(n, list):
+            result = '[ '
+            for m in map(nodes_to_string, n):
+                result += m
+                result += ' '
+            result += ']'
+
+            return result
+        else:
+            try:
+                return tostring(remove_private(copy(n)))
+            except Exception as e:
+                return n
+
+    def print_trace(*args):
+        import sys
+
+        sys.stderr.write("    " * tracing_level)
+        for arg in args:
+            sys.stderr.write(str(arg))
+            sys.stderr.write(' ')
+        sys.stderr.write('\n')
+        sys.stderr.flush()
+
+    def wrapped(s, *args, **kwargs):
+        global tracing_level
+
+        print_trace(p.__name__, repr(s))
+
+        tracing_level += 1
+        s, n = p(s, *args, **kwargs)
+        tracing_level -= 1
+
+        print_trace("-> ", repr(s), nodes_to_string(n))
+
+        return s, n
+
+    return wrapped
+
+def parse_expr(s, siblings, required=False):
+    s, n = parse_m(s, required=required)
+
+    if not n is None:
+        # Being both an _opening and a _closing element is a trait of
+        # symmetrical delimiters (e.g. ||).
+        # In that case, act as an opening delimiter only if there is not
+        # already one of the same kind among the preceding siblings.
+        if n.get('_opening', False) \
+           and (not n.get('_closing', False) \
+                or find_node_backwards(siblings, n.text) == -1):
+            s, children = parse_exprs(s, [n], inside_parens=True)
+            n = El('mrow', *children)
+
+        if n.tag == 'mtext':
+            s, n = parse_string(s)
+        elif n.get('_arity', 0) == 1:
+            s, m = parse_expr(s, [], True)
+            n = unary(n, m, n.get('_swap', False))
+        elif n.get('_arity', 0) == 2:
+            s, m1 = parse_expr(s, [], True)
+            s, m2 = parse_expr(s, [], True)
+            n = binary(n, m1, m2, n.get('_swap', False))
+
+    return s, n
+
+def find_node(ns, text):
+    for i, n in enumerate(ns):
+        if n.text == text:
+            return i
+
+    return -1
+
+def find_node_backwards(ns, text):
+    for i, n in enumerate(reversed(ns)):
+        if n.text == text:
+            return len(ns) - i
+
+    return -1
+
+def nodes_to_row(row):
+    mrow = El('mtr')
+
+    nodes = row.getchildren()
+
+    while True:
+        i = find_node(nodes, ',')
+
+        if i > 0:
+            mrow.append(El('mtd', *nodes[:i]))
+
+            nodes = nodes[i+1:]
+        else:
+            mrow.append(El('mtd', *nodes))
+            break
+
+    return mrow
+
+def nodes_to_matrix(nodes):
+    mtable = El('mtable')
+
+    for row in nodes[1:-1]:
+        if row.text == ',':
+            continue
+
+        mtable.append(nodes_to_row(strip_parens(row)))
+
+    return El('mrow', nodes[0], mtable, nodes[-1])
+
+def parse_exprs(s, nodes=None, inside_parens=False):
+    if nodes is None:
+        nodes = []
+
+    inside_matrix = False
+
+    while True:
+        s, n = parse_expr(s, nodes)
+
+        if not n is None:
+            nodes.append(n)
+
+            if n.get('_closing', False):
+                if not inside_matrix:
+                    return s, nodes
+                else:
+                    return s, nodes_to_matrix(nodes)
+
+            if inside_parens and n.text == ',' and is_enclosed_in_parens(nodes[-2]):
+                inside_matrix = True
+
+            if len(nodes) >= 3 and nodes[-2].get('_special_binary'):
+                transform =  nodes[-2].get('_special_binary')
+                nodes[-3:] = [transform(nodes[-3], nodes[-1])]
+
+        if s == '':
+            return '', nodes
+
+def remove_private(n):
+    _ks = [k for k in n.keys() if k.startswith('_') or k == 'attrib']
+
+    for _k in _ks:
+        del n.attrib[_k]
+
+    for c in n.getchildren():
+        remove_private(c)
+
+    return n
+
+def remove_invisible(ns):
+    for i in range(len(ns)-1, 0, -1):
+        if ns[i].get('_invisible', False):
+            del ns[i]
+        else:
+            remove_invisible(ns[i].getchildren())
+
+def copy(n):
+    m = El(n.tag, n.text, **dict(n.items()))
+
+    for c in n.getchildren():
+        m.append(copy(c))
+
+    return m
+
+def parse_m(s, required=False):
+    s = s.lstrip()
+
+    if s == '':
+        return '', El('mi', u'\u25a1') if required else None
+
+    m = number_re.match(s)
+
+    if m:
+        number = m.group(0)
+        if number[0] == '-':
+            return s[m.end():], El('mrow', El('mo', '-'), El('mn', number[1:]))
+        else:
+            return s[m.end():], El('mn', number)
+
+    for y in symbol_names:
+        if (s.startswith(y)):
+            n = copy(symbols[y])
+
+            if n.get('_space', False):
+                n = El('mrow',
+                        El('mspace', width='0.5ex'),
+                        n,
+                        El('mspace', width='0.5ex'))
+
+            return s[len(y):], n
+
+    return s[1:], El('mi' if s[0].isalpha() else 'mo', s[0])
+	
+	
+	
+symbols = {}
+
+def Symbol(input, el):
+        symbols[input] = el
+
+Symbol(input="alpha",  el=El("mi", u"\u03B1"))
+Symbol(input="beta",  el=El("mi", u"\u03B2"))
+Symbol(input="chi",    el=El("mi", u"\u03C7"))
+Symbol(input="delta",  el=El("mi", u"\u03B4"))
+Symbol(input="Delta",  el=El("mo", u"\u0394"))
+Symbol(input="epsi",   el=El("mi", u"\u03B5"))
+Symbol(input="varepsilon", el=El("mi", u"\u025B"))
+Symbol(input="eta",    el=El("mi", u"\u03B7"))
+Symbol(input="gamma",  el=El("mi", u"\u03B3"))
+Symbol(input="Gamma",  el=El("mo", u"\u0393"))
+Symbol(input="iota",   el=El("mi", u"\u03B9"))
+Symbol(input="kappa",  el=El("mi", u"\u03BA"))
+Symbol(input="lambda", el=El("mi", u"\u03BB"))
+Symbol(input="Lambda", el=El("mo", u"\u039B"))
+Symbol(input="mu",     el=El("mi", u"\u03BC"))
+Symbol(input="nu",     el=El("mi", u"\u03BD"))
+Symbol(input="omega",  el=El("mi", u"\u03C9"))
+Symbol(input="Omega",  el=El("mo", u"\u03A9"))
+Symbol(input="phi",    el=El("mi", u"\u03C6"))
+Symbol(input="varphi", el=El("mi", u"\u03D5"))
+Symbol(input="Phi",    el=El("mo", u"\u03A6"))
+Symbol(input="pi",     el=El("mi", u"\u03C0"))
+Symbol(input="Pi",     el=El("mo", u"\u03A0"))
+Symbol(input="psi",    el=El("mi", u"\u03C8"))
+Symbol(input="Psi",    el=El("mi", u"\u03A8"))
+Symbol(input="rho",    el=El("mi", u"\u03C1"))
+Symbol(input="sigma",  el=El("mi", u"\u03C3"))
+Symbol(input="Sigma",  el=El("mo", u"\u03A3"))
+Symbol(input="tau",    el=El("mi", u"\u03C4"))
+Symbol(input="theta",  el=El("mi", u"\u03B8"))
+Symbol(input="vartheta", el=El("mi", u"\u03D1"))
+Symbol(input="Theta",  el=El("mo", u"\u0398"))
+Symbol(input="upsilon", el=El("mi", u"\u03C5"))
+Symbol(input="xi",     el=El("mi", u"\u03BE"))
+Symbol(input="Xi",     el=El("mo", u"\u039E"))
+Symbol(input="zeta",   el=El("mi", u"\u03B6"))
+
+Symbol(input="*",  el=El("mo", u"\u22C5", mathsize='big'))
+Symbol(input="**", el=El("mo", u"\u22C6"))
+
+Symbol(input=" ", el=El('mspace', width='0.5ex'))
+
+Symbol(input="'", el=El("mo", u"'", mathsize='4ex'))
+
+Symbol(input="/", el=El("mo", u"/", _special_binary=frac))
+Symbol(input="^", el=El("mo", u"^", _special_binary=sup))
+Symbol(input="_", el=El("mo", u"_", _special_binary=sub))
+Symbol(input="//", el=El("mo", u"/"))
+Symbol(input="\\\\", el=El("mo", u"\\"))
+Symbol(input="setminus", el=El("mo", u"\\"))
+Symbol(input="xx", el=El("mo", u"\u00D7"))
+Symbol(input="-:", el=El("mo", u"\u00F7"))
+Symbol(input="@",  el=El("mo", u"\u2218"))
+Symbol(input="o+", el=El("mo", u"\u2295"))
+Symbol(input="ox", el=El("mo", u"\u2297"))
+Symbol(input="o.", el=El("mo", u"\u2299"))
+Symbol(input="sum", el=El("mo", u"\u2211", _underover=True, mathsize='3ex'))
+Symbol(input="prod", el=El("mo", u"\u220F", _underover=True))
+Symbol(input="^^",  el=El("mo", u"\u2227"))
+Symbol(input="^^^", el=El("mo", u"\u22C0", _underover=True))
+Symbol(input="vv",  el=El("mo", u"\u2228"))
+Symbol(input="vvv", el=El("mo", u"\u22C1", _underover=True))
+Symbol(input="nn",  el=El("mo", u"\u2229"))
+Symbol(input="nnn", el=El("mo", u"\u22C2", _underover=True))
+Symbol(input="uu",  el=El("mo", u"\u222A"))
+Symbol(input="uuu", el=El("mo", u"\u22C3", _underover=True))
+
+Symbol(input="!=",  el=El("mo", u"\u2260"))
+Symbol(input=":=",  el=El("mo", u":="))
+Symbol(input="lt",  el=El("mo", u"<"))
+Symbol(input="<=",  el=El("mo", u"\u2264"))
+Symbol(input="lt=", el=El("mo", u"\u2264"))
+Symbol(input=">=",  el=El("mo", u"\u2265"))
+Symbol(input="geq", el=El("mo", u"\u2265"))
+Symbol(input="-<",  el=El("mo", u"\u227A"))
+Symbol(input="-lt", el=El("mo", u"\u227A"))
+Symbol(input=">-",  el=El("mo", u"\u227B"))
+Symbol(input="-<=", el=El("mo", u"\u2AAF"))
+Symbol(input=">-=", el=El("mo", u"\u2AB0"))
+Symbol(input="in",  el=El("mo", u"\u2208"))
+Symbol(input="!in", el=El("mo", u"\u2209"))
+Symbol(input="sub", el=El("mo", u"\u2282"))
+Symbol(input="sup", el=El("mo", u"\u2283"))
+Symbol(input="sube", el=El("mo", u"\u2286"))
+Symbol(input="supe", el=El("mo", u"\u2287"))
+Symbol(input="-=",  el=El("mo", u"\u2261"))
+Symbol(input="~=",  el=El("mo", u"\u2245"))
+Symbol(input="~~",  el=El("mo", u"\u2248"))
+Symbol(input="prop", el=El("mo", u"\u221D"))
+
+Symbol(input="algorithm", el=El("mtext", u"algorithm", _space=True))
+Symbol(input="and", el=El("mtext", u"and", _space=True))
+Symbol(input="annotation",  el=El("mtext", u"annotation", _space=True))
+Symbol(input="assert", el=El("mtext", u"assert", _space=True))
+Symbol(input="block",  el=El("mtext", u"block", _space=True))
+Symbol(input="break", el=El("mtext", u"break", _space=True))
+Symbol(input="class",  el=El("mtext", u"class", _space=True))
+Symbol(input="connect", el=El("mtext", u"connect", _space=True))
+Symbol(input="connector",  el=El("mtext", u"connector", _space=True))
+Symbol(input="constant", el=El("mtext", u"constant", _space=True))
+Symbol(input="constrainedby",  el=El("mtext", u"constrainedby", _space=True))
+Symbol(input="der", el=El("mtext", u"der", _space=True))
+Symbol(input="discrete",  el=El("mtext", u"discrete", _space=True))
+Symbol(input="each", el=El("mtext", u"each", _space=True))
+Symbol(input="else",  el=El("mtext", u"else", _space=True))
+Symbol(input="elseif", el=El("mtext", u"elseif", _space=True))
+Symbol(input="elsewhen",  el=El("mtext", u"elsewhen", _space=True))
+Symbol(input="encapsulated", el=El("mtext", u"encapsulated", _space=True))
+Symbol(input="end",  el=El("mtext", u"end", _space=True))
+Symbol(input="enumeration", el=El("mtext", u"enumeration", _space=True))
+Symbol(input="equation",  el=El("mtext", u"equation", _space=True))
+Symbol(input="expandable", el=El("mtext", u"expandable", _space=True))
+Symbol(input="extends",  el=El("mtext", u"extends", _space=True))
+Symbol(input="external", el=El("mtext", u"external", _space=True))
+Symbol(input="false",  el=El("mtext", u"false", _space=True))
+Symbol(input="final", el=El("mtext", u"final", _space=True))
+Symbol(input="flow",  el=El("mtext", u"flow", _space=True))
+Symbol(input="for", el=El("mtext", u"for", _space=True))
+Symbol(input="function",  el=El("mtext", u"function", _space=True))
+Symbol(input="if",  el=El("mtext", u"if", _space=True))
+Symbol(input="import",  el=El("mtext", u"import", _space=True))
+Symbol(input="impure",  el=El("mtext", u"impure", _space=True))
+Symbol(input="in",  el=El("mtext", u"in", _space=True))
+Symbol(input="initial",  el=El("mtext", u"initial", _space=True))
+Symbol(input="inner", el=El("mtext", u"inner", _space=True))
+Symbol(input="input",  el=El("mtext", u"input", _space=True))
+Symbol(input="loop", el=El("mtext", u"loop", _space=True))
+Symbol(input="model",  el=El("mtext", u"model", _space=True))
+Symbol(input="operator", el=El("mtext", u"operator", _space=True))
+Symbol(input="or",  el=El("mtext", u"or", _space=True))
+Symbol(input="outer", el=El("mtext", u"outer", _space=True))
+Symbol(input="output",  el=El("mtext", u"output", _space=True))
+Symbol(input="package", el=El("mtext", u"package", _space=True))
+Symbol(input="parameter",  el=El("mtext", u"parameter", _space=True))
+Symbol(input="partial", el=El("mtext", u"partial", _space=True))
+Symbol(input="protected",  el=El("mtext", u"protected", _space=True))
+Symbol(input="public", el=El("mtext", u"public", _space=True))
+Symbol(input="pure",  el=El("mtext", u"pure", _space=True))
+Symbol(input="record", el=El("mtext", u"record", _space=True))
+Symbol(input="redeclare",  el=El("mtext", u"redeclare", _space=True))
+Symbol(input="replaceable", el=El("mtext", u"replaceable", _space=True))
+Symbol(input="return",  el=El("mtext", u"return", _space=True))
+Symbol(input="stream", el=El("mtext", u"stream", _space=True))
+Symbol(input="then",  el=El("mtext", u"then", _space=True))
+Symbol(input="true", el=El("mtext", u"true", _space=True))
+Symbol(input="type",  el=El("mtext", u"type", _space=True))
+Symbol(input="when", el=El("mtext", u"when", _space=True))
+Symbol(input="while",  el=El("mtext", u"while", _space=True))
+Symbol(input="within", el=El("mtext", u"within", _space=True))
+
+
+
+
+
+
+# Symbol(input="and", el=El("mtext", u"and", _space=True))
+# Symbol(input="or",  el=El("mtext", u"or", _space=True))
+Symbol(input="not", el=El("mo", u"\u00AC"))
+Symbol(input="=>",  el=El("mo", u"\u21D2"))
+# Symbol(input="if",  el=El("mo", u"if", _space=True))
+Symbol(input="<=>", el=El("mo", u"\u21D4"))
+Symbol(input="AA",  el=El("mo", u"\u2200"))
+Symbol(input="EE",  el=El("mo", u"\u2203"))
+Symbol(input="_|_", el=El("mo", u"\u22A5"))
+Symbol(input="TT",  el=El("mo", u"\u22A4"))
+Symbol(input="|--",  el=El("mo", u"\u22A2"))
+Symbol(input="|==",  el=El("mo", u"\u22A8"))
+
+Symbol(input="(",  el=El("mo", "(", _opening=True))
+Symbol(input=")",  el=El("mo", ")", _closing=True))
+Symbol(input="[",  el=El("mo", "[", _opening=True))
+Symbol(input="]",  el=El("mo", "]", _closing=True))
+Symbol(input="{",  el=El("mo", "{", _opening=True))
+Symbol(input="}",  el=El("mo", "}", _closing=True))
+Symbol(input="|", el=El("mo", u"|", _opening=True, _closing=True))
+Symbol(input="||", el=El("mo", u"\u2016", _opening=True, _closing=True)) # double vertical line
+Symbol(input="(:", el=El("mo", u"\u2329", _opening=True))
+Symbol(input=":)", el=El("mo", u"\u232A", _closing=True))
+Symbol(input="<<", el=El("mo", u"\u2329", _opening=True))
+Symbol(input=">>", el=El("mo", u"\u232A", _closing=True))
+Symbol(input="{:", el=El("mo", u"{:", _opening=True, _invisible=True))
+Symbol(input=":}", el=El("mo", u":}", _closing=True, _invisible=True))
+
+Symbol(input="int",  el=El("mo", u"\u222B", mathsize='3ex'))
+# Symbol(input="dx",   el=El("mi", u"{:d x:}", _definition=True))
+# Symbol(input="dy",   el=El("mi", u"{:d y:}", _definition=True))
+# Symbol(input="dz",   el=El("mi", u"{:d z:}", _definition=True))
+# Symbol(input="dt",   el=El("mi", u"{:d t:}", _definition=True))
+Symbol(input="oint", el=El("mo", u"\u222E", mathsize='4ex'))
+Symbol(input="del",  el=El("mo", u"\u2202"))
+Symbol(input="grad", el=El("mo", u"\u2207"))
+Symbol(input="+-",   el=El("mo", u"\u00B1"))
+Symbol(input="O/",   el=El("mo", u"\u2205"))
+Symbol(input="oo",   el=El("mo", u"\u221E"))
+Symbol(input="aleph", el=El("mo", u"\u2135"))
+Symbol(input="...",  el=El("mo", u"..."))
+Symbol(input=":.",  el=El("mo", u"\u2234"))
+Symbol(input="/_",  el=El("mo", u"\u2220"))
+Symbol(input="\\ ",  el=El("mo", u"\u00A0"))
+Symbol(input="quad", el=El("mo", u"\u00A0\u00A0"))
+Symbol(input="qquad", el=El("mo", u"\u00A0\u00A0\u00A0\u00A0"))
+Symbol(input="cdots", el=El("mo", u"\u22EF"))
+Symbol(input="vdots", el=El("mo", u"\u22EE"))
+Symbol(input="ddots", el=El("mo", u"\u22F1"))
+Symbol(input="diamond", el=El("mo", u"\u22C4"))
+Symbol(input="square", el=El("mo", u"\u25A1"))
+Symbol(input="|__", el=El("mo", u"\u230A"))
+Symbol(input="__|", el=El("mo", u"\u230B"))
+Symbol(input="|~", el=El("mo", u"\u2308"))
+Symbol(input="~|", el=El("mo", u"\u2309"))
+Symbol(input="CC",  el=El("mo", u"\u2102"))
+Symbol(input="NN",  el=El("mo", u"\u2115"))
+Symbol(input="QQ",  el=El("mo", u"\u211A"))
+Symbol(input="RR",  el=El("mo", u"\u211D"))
+Symbol(input="ZZ",  el=El("mo", u"\u2124"))
+
+# Symbol(input="f",   el=El("mi", u"f", _func=True)) # sample
+# Symbol(input="g",   el=El("mi", u"g", _func=True))
+
+Symbol(input="lim",  el=El("mo", u"lim", _underover=True))
+Symbol(input="Lim",  el=El("mo", u"Lim", _underover=True))
+Symbol(input="sin",  el=El("mrow", El("mo", "sin"), _arity=1))
+Symbol(input="sin",  el=El("mrow", El("mo", "sin"), _arity=1))
+Symbol(input="cos",  el=El("mrow", El("mo", "cos"), _arity=1))
+Symbol(input="tan",  el=El("mrow", El("mo", "tan"), _arity=1))
+Symbol(input="sinh", el=El("mrow", El("mo", "sinh"), _arity=1))
+Symbol(input="cosh", el=El("mrow", El("mo", "cosh"), _arity=1))
+Symbol(input="tanh", el=El("mrow", El("mo", "tanh"), _arity=1))
+Symbol(input="cot",  el=El("mrow", El("mo", "cot"), _arity=1))
+Symbol(input="sec",  el=El("mrow", El("mo", "sec"), _arity=1))
+Symbol(input="csc",  el=El("mrow", El("mo", "csc"), _arity=1))
+Symbol(input="log",  el=El("mrow", El("mo", "log"), _arity=1))
+Symbol(input="ln",   el=El("mrow", El("mo", "ln"), _arity=1))
+Symbol(input="det",  el=El("mrow", El("mo", "det"), _arity=1))
+Symbol(input="gcd",  el=El("mrow", El("mo", "gcd"), _arity=1))
+Symbol(input="lcm",  el=El("mrow", El("mo", "lcm"), _arity=1))
+Symbol(input="dim",  el=El("mo", u"dim"))
+Symbol(input="mod",  el=El("mo", u"mod"))
+Symbol(input="lub",  el=El("mo", u"lub"))
+Symbol(input="glb",  el=El("mo", u"glb"))
+Symbol(input="min",  el=El("mo", u"min", _underover=True))
+Symbol(input="max",  el=El("mo", u"max", _underover=True))
+
+Symbol(input="uarr", el=El("mo", u"\u2191"))
+Symbol(input="darr", el=El("mo", u"\u2193"))
+Symbol(input="rarr", el=El("mo", u"\u2192"))
+Symbol(input="->",   el=El("mo", u"\u2192"))
+Symbol(input="|->",  el=El("mo", u"\u21A6"))
+Symbol(input="larr", el=El("mo", u"\u2190"))
+Symbol(input="harr", el=El("mo", u"\u2194"))
+Symbol(input="rArr", el=El("mo", u"\u21D2"))
+Symbol(input="lArr", el=El("mo", u"\u21D0"))
+Symbol(input="hArr", el=El("mo", u"\u21D4"))
+
+Symbol(input="hat", el=El("mover", El("mo", u"\u005E"), _arity=1, _swap=1))
+Symbol(input="bar", el=El("mover", El("mo", u"\u00AF"), _arity=1, _swap=1))
+Symbol(input="vec", el=El("mover", El("mo", u"\u2192"), _arity=1, _swap=1))
+Symbol(input="dot", el=El("mover", El("mo", u"."), _arity=1, _swap=1))
+Symbol(input="ddot",el=El("mover", El("mo", u".."), _arity=1, _swap=1))
+Symbol(input="ul", el=El("munder", El("mo", u"\u0332"), _arity=1, _swap=1))
+
+Symbol(input="sqrt", el=El("msqrt", _arity=1))
+Symbol(input="root", el=El("mroot", _arity=2, _swap=True))
+Symbol(input="frac", el=El("mfrac", _arity=2))
+Symbol(input="stackrel", el=El("mover", _arity=2))
+
+Symbol(input="text", el=El("mtext", _arity=1))
+# {input:"mbox", tag:"mtext", output:"mbox", tex:null, ttype:TEXT},
+# {input:"\"",   tag:"mtext", output:"mbox", tex:null, ttype:TEXT};
+
+symbol_names = sorted(symbols.keys(), key=lambda s: len(s), reverse=True)
+
+if __name__ == '__main__':
+    import sys
+    args = sys.argv[1:]
+    if args[0] == '-m':
+        import markdown
+        args.pop(0)
+        element = markdown.etree.Element
+    elif args[0] == '-c':
+        from xml.etree.cElementTree import Element
+        args.pop(0)
+        element = Element
+    else:
+        element = Element
+
+    print """\
+<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+    <head>
+        <meta http-equiv="Content-Type" content="application/xhtml+xml" />
+        <title>ASCIIMathML preview</title>
+    </head>
+    <body>
+"""
+    print tostring(parse(' '.join(args), element))
+    print """\
+    </body>
+</html>
+"""
